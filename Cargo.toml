@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+authors = ["Harukoto"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+publish = false
