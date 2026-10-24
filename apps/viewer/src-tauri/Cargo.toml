@@ -1,0 +1,24 @@
+[package]
+name = "monitor-viewer"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Desktop viewer for traffic-watcher databases"
+
+[lib]
+name = "monitor_viewer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+anyhow = "1.0.104"
+monitor-core = { version = "0.1.0", path = "../../../crates/core" }
+monitor-storage = { version = "0.1.0", path = "../../../crates/storage" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-dialog = "2.8.3"
