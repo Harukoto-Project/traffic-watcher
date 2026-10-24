@@ -1,0 +1,11 @@
+/target
+/data
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+/.dev
+/.cursor
+AGENTS.md
+COMMIT_CONVENTION.md
