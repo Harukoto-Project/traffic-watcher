@@ -1,0 +1,19 @@
+[package]
+name = "monitorctl"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "monitorctl: command line client for the traffic-watcher daemon"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.6.7", features = ["derive"] }
+monitor-core = { version = "0.1.0", path = "../core", package = "monitor-core" }
+monitor-ipc = { version = "0.1.0", path = "../ipc", package = "monitor-ipc" }
+monitor-storage = { version = "0.1.0", path = "../storage", package = "monitor-storage" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt", "time"] }
