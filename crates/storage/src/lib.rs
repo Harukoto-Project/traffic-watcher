@@ -8,6 +8,10 @@ use monitor_core::{Event, EventKind};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
+mod analysis;
+
+pub use analysis::{DatabaseStats, PingBucket, SystemBucket, SystemSummary};
+
 const HOUR_MS: i64 = 3_600_000;
 
 const ROLLUP_METRICS: &[(&str, &str)] = &[
@@ -223,58 +227,7 @@ impl Storage {
     }
 
     pub fn summary(&self, since_ms: i64) -> anyhow::Result<Vec<SourceSummary>> {
-        let conn = self.lock();
-        let mut stmt = conn.prepare_cached(
-            "SELECT source, json_extract(fields, '$.ok'), json_extract(fields, '$.rtt_ms')
-             FROM events WHERE ts_ms >= ?1 AND source LIKE 'ping:%' AND kind = 'metric'
-             ORDER BY source",
-        )?;
-        let rows = stmt.query_map(params![since_ms], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-            ))
-        })?;
-
-        let mut acc: BTreeMap<String, (i64, i64, Vec<f64>)> = BTreeMap::new();
-        for row in rows {
-            let (source, ok, rtt) = row?;
-            let entry = acc.entry(source).or_insert((0, 0, Vec::new()));
-            entry.0 += 1;
-            if ok == Some(1) {
-                if let Some(rtt) = rtt {
-                    entry.2.push(rtt);
-                }
-            } else {
-                entry.1 += 1;
-            }
-        }
-
-        let mut out = Vec::new();
-        for (source, (samples, lost, mut rtts)) in acc {
-            rtts.sort_by(|a, b| a.total_cmp(b));
-            let avg = if rtts.is_empty() {
-                None
-            } else {
-                Some(rtts.iter().sum::<f64>() / rtts.len() as f64)
-            };
-            out.push(SourceSummary {
-                source,
-                samples,
-                lost,
-                loss_pct: if samples > 0 {
-                    lost as f64 * 100.0 / samples as f64
-                } else {
-                    0.0
-                },
-                avg_ms: avg,
-                p95_ms: percentile(&rtts, 0.95),
-                p99_ms: percentile(&rtts, 0.99),
-                max_ms: rtts.last().copied(),
-            });
-        }
-        Ok(out)
+        self.summary_range(since_ms, i64::MAX)
     }
 
     pub fn query_hourly(
