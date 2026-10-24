@@ -1,0 +1,55 @@
+[daemon]
+data_dir = "data"
+log_level = "info"
+
+[ping]
+interval_ms = 1000
+timeout_ms = 1000
+
+[[ping.targets]]
+name = "router"
+host = "192.168.0.1"
+
+[[ping.targets]]
+name = "cloudflare"
+host = "1.1.1.1"
+
+[system]
+enabled = true
+interval_ms = 2000
+
+[process]
+enabled = true
+interval_ms = 10000
+top_n = 5
+
+[storage]
+retention_days = 7
+snapshot_retention_days = 90
+flush_interval_ms = 1000
+
+[alert]
+pre_seconds = 30
+post_seconds = 15
+
+[[alert.rules]]
+name = "ping_spike"
+source = "ping:*"
+condition = "rtt_ms > 100"
+consecutive = 3
+cooldown_sec = 300
+notify = ["log"]
+snapshot = true
+
+[[alert.rules]]
+name = "ping_loss"
+source = "ping:*"
+condition = "ok == false"
+consecutive = 3
+cooldown_sec = 300
+notify = ["log"]
+snapshot = true
+
+[ipc]
+enabled = true
+pipe_name = "monitord"
