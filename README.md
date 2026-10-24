@@ -1,34 +1,132 @@
+<div align="center">
+
+<img src="apps/viewer/src-tauri/icons/128x128.png" width="96" alt="traffic-watcher">
+
 # traffic-watcher
 
-Windows向けの常駐監視デーモン(Rust製)。
+ゲーム中のPingが跳ねた原因を、あとから切り分けるためのWindows向け常駐監視ツール。
 
-最初のユースケースは「ゲーム中のPingが不定期に跳ねる問題」の切り分け。ルーター宛てと外部宛て(`1.1.1.1`)のpingを同一時刻で計測し、同じ時刻のCPU・メモリ・NIC送受信量・負荷の高いプロセスと一緒に記録する。遅延の原因がLAN内か回線側か、PC側の負荷かを後から判別できるようにする。
+[![CI](https://github.com/Harukoto-Project/traffic-watcher/actions/workflows/ci.yml/badge.svg)](https://github.com/Harukoto-Project/traffic-watcher/actions/workflows/ci.yml)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
+![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
+
+[概要](#概要) · [機能](#機能) · [ビューア](#ビューア) · [セットアップ](#セットアップ) · [使い方](#使い方) · [設定](#設定) · [構成](#構成) · [ライセンス](#ライセンス)
+
+[日本語](README.md) · [English](README.en.md) · [한국어](README.ko.md)
+
+</div>
+
+---
+
+## 概要
+
+traffic-watcherは、Rust製の常駐監視デーモン`monitord`と、確認用のCLI`monitorctl`、デスクトップのビューアで構成される。
+
+最初のユースケースは「ゲーム中のPingが不定期に跳ねる問題」の切り分け。ルーター宛てと外部宛て(`1.1.1.1`)のpingを同一時刻で計測し、同じ時刻のCPU・メモリ・NIC送受信量・負荷の高いプロセスと一緒に記録する。遅延の原因がLAN内か回線側か、PC側の負荷かを後から判別できる。
+
+| コンポーネント | 役割 |
+|---|---|
+| `monitord` | 計測、保存、アラート評価、通知を行う常駐デーモン。コンソールでもWindowsサービスでも動く |
+| `monitorctl` | デーモンへの問い合わせや、SQLiteの直接参照を行うCLI |
+| ビューア | 保存したデータをグラフと表で確認するデスクトップアプリ(`apps/viewer`) |
+
+---
 
 ## 機能
+
+### 計測と記録
 
 - ICMP ping(`IcmpSendEcho`。通常ユーザー権限で動作)。複数ターゲットを同一タイムスタンプ(UTCミリ秒)で記録
 - system Collector: CPU使用率、メモリ、ディスク使用率、NICの送受信バイト/秒
 - process Collector: CPU使用率とメモリ使用量の上位Nプロセス
+- SQLite(WAL)へのバッチ保存。保持期間を過ぎた生データは1時間単位の集計に畳み込んでから削除
+
+### アラートと通知
+
 - アラートルール: 条件式、連続回数、クールダウン
 - スナップショット: アラート発生の前後(既定は前30秒、後15秒)の全イベントを別テーブルへ保存。通常データのretentionでは消えない
 - Discord Webhook通知(失敗時は1回リトライ)
-- SQLite(WAL)へのバッチ保存。保持期間を過ぎた生データは1時間単位の集計に畳み込んでから削除
+
+### 運用と確認
+
 - 設定ファイルの変更を検知するホットリロード(不正な設定は拒否して前の設定を維持)
 - Collectorの異常終了・panicを検知して指数バックオフで再起動
 - Windowsサービス(LocalSystem、自動起動、異常終了時の自動再起動)
-- Named Pipeによる状態確認・履歴取得、CLI `monitorctl`
+- Named Pipeによる状態確認・履歴取得と、CLI`monitorctl`
+- デスクトップのビューアによる、グラフと表での確認
 
-## 必要環境とビルド
+---
+
+## ビューア
+
+`apps/viewer`にある、Tauri(Rust + React)製のデスクトップアプリ。デーモンが書き出したSQLiteのデータベースを読み取り専用で開き、時刻をそろえて数値と時系列を比べられる。
+
+> [!NOTE]
+> ビューアは開発中。画面の構成や見た目は今後変わることがある。
+
+### 画面
+
+| カテゴリ | 画面 | 内容 |
+|---|---|---|
+| 状況 | 概要 | CPU・メモリなどのシステムの要約、ターゲットごとのpingの要約、データベースの情報 |
+| 状況 | タイムライン | pingの推移、パケットロス、CPUとメモリ、ネットワークの時系列グラフ。スナップショットの発生時刻を重ねて表示 |
+| 状況 | 長期集計 | retentionで削除済みの期間を含む1時間集計。pingの往復時間、ロス率、CPU、メモリ、ネットワーク受信/送信から選ぶ |
+| 記録 | スナップショット | アラートごとの一覧と詳細。ping、システム、プロセスの順位、前後のイベントを同じ時間軸で確認 |
+| 記録 | イベント | ソースと種別で絞り込めるイベント一覧。表示件数は最新200 / 1000 / 5000件 |
+
+概要、タイムライン、長期集計、イベントは、期間(15分、1時間、6時間、24時間、7日、全期間、指定)で表示範囲を切り替えられる。テーマはライト、ダーク、自動から選べる。
+
+### データベースの選択
+
+起動時は、前回開いたデータベース、次に自動検出したデータベースの順に開く。自動検出の場所は次のとおり。
+
+- カレントディレクトリと実行ファイルの場所から、最大6階層上までの`data\monitor.db`
+- `%ProgramData%\monitor\monitor.db`(サービス実行時の保存先)
+
+見つからないときや別のファイルを見たいときは、サイドバー下部のデータベースの操作からファイルを選ぶ。
+
+### 起動とビルド
+
+`apps\viewer`で実行する。初回は依存関係を入れる。
+
+```powershell
+cd apps\viewer
+yarn install
+```
+
+開発モードで起動する。
+
+```powershell
+yarn tauri dev
+```
+
+インストーラー(NSIS)を作る。
+
+```powershell
+yarn tauri build
+```
+
+成果物は`target\release\bundle\nsis\`に出力される。
+
+---
+
+## セットアップ
+
+### 必要環境
 
 - Windows
 - Rust(stable)
+- ビューアを使う場合は、Node.js、yarn、TauriのビルドにWebView2とMSVCのビルドツール
+
+### ビルド
 
 ```powershell
-cargo build --release
-cargo test
+cargo build --release -p monitord -p monitorctl
 ```
 
 成果物は`target\release\monitord.exe`(デーモン)と`target\release\monitorctl.exe`(CLI)。
+
+---
 
 ## 使い方
 
@@ -116,6 +214,8 @@ monitorctl set-interval 250
 | `--db <PATH>` | デーモンを介さずSQLiteを読み取り専用で直接参照(`history` / `summary` / `hourly` / `snapshots` / `snapshot`) |
 | `--json` | 整形済みJSONで出力 |
 
+---
+
 ## 設定
 
 `config/default.toml`を参照。すべてのセクションに既定値があり、未知のキーはエラーになる(`toast`などの未対応値も拒否する)。
@@ -164,7 +264,7 @@ snapshot = true
 - フィールドが存在しないイベント(例: ロスしたときの`rtt_ms`)は「条件を満たさない」扱いで、連続回数がリセットされる。ロスは`ok == false`のルールで検出する
 - 設定のリロードでは、定義が変わっていないルールの連続回数とクールダウンを引き継ぐ
 
-## データモデル
+### データモデル
 
 SQLiteファイルは`<data_dir>/monitor.db`。
 
@@ -191,6 +291,8 @@ SQLiteファイルは`<data_dir>/monitor.db`。
 SELECT ts_ms, source, fields FROM events ORDER BY id DESC LIMIT 10;
 ```
 
+---
+
 ## 構成
 
 ```mermaid
@@ -209,6 +311,7 @@ flowchart LR
     ipc --> app[app / reload]
     file[config.toml] -->|変更検知| app
     app --> pipe
+    viewer[ビューア] -->|読み取り専用| db
 ```
 
 | パス | 内容 |
@@ -220,7 +323,10 @@ flowchart LR
 | `crates/ipc` | Named Pipeサーバー/クライアント、プロトコル、クエリ実行 |
 | `crates/daemon` | `monitord`。設定、pipeline、supervisor、サービス、DPAPI |
 | `crates/cli` | `monitorctl` |
+| `apps/viewer` | ビューア。`src-tauri`がTauriのRust側、`src`がReactのUI |
 | `config/` | `default.toml`(コンソール用)、`service.toml`(サービス用) |
+
+---
 
 ## ロードマップ
 
@@ -230,13 +336,45 @@ flowchart LR
 - [x] M4: アラートルールとスパイク前後のスナップショット保存
 - [x] M5: Named Pipeと`monitorctl`
 - [x] M6: Discord Webhook、設定のホットリロード
-- [ ] M7(任意): ローカルWeb UI。履歴の確認はCLIにしたため見送り
+- [ ] M7: デスクトップのビューア(`apps/viewer`)。各画面は実装済みで、開発を継続中
+
+---
 
 ## セキュリティ
 
 - Named Pipeは`\\.\pipe\monitord`。リモートクライアントは拒否し、ACLはSYSTEMとAdministratorsに全権、対話ログオンユーザーに読み書きを許可する。デーモンの二重起動は、パイプの先頭インスタンスが作れないことで検出して失敗させる
 - IPCの操作は状態取得、履歴取得、設定のリロード、ping間隔の一時変更のみ。任意コマンドの実行や設定の書き換えはできない
 - Webhook URLの保護は上記のDPAPIを参照
+- ビューアはデータベースを読み取り専用で開く
+
+## 既知の制限
+
+- IPv4のみ対応
+- ICMP、サービス、Named Pipe、DPAPIはWindows専用(他OSではビルドは通るが、実行時にエラーになる)
+- 通知はログとDiscord Webhookのみ。トースト通知は未対応(サービスはセッション0で動くため、実装するならユーザーセッション側の常駐クライアントが必要)
+- pingは全ターゲットを同時に送って全員の結果を待つため、応答しないターゲットがあると、その分だけ全ターゲットの計測周期が`timeout_ms`に引きずられる
+- `rtt_ms`はAPIの返却値ではなく、呼び出し前後の`Instant`による実測値
+- ディスク使用率は負荷を避けるため、systemの30サンプルに1回だけ更新する
+- system / processのCPU使用率とNICの送受信量は`sysinfo`の値
+- ビューアの表示言語は日本語のみ
+
+## 開発
+
+CIと同じ確認を行う。
+
+```powershell
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+ビューアのフロントエンドは`apps\viewer`で確認する。
+
+```powershell
+yarn typecheck
+yarn lint
+yarn format:check
+```
 
 ## コントリビュート
 
@@ -248,13 +386,3 @@ IssueとPull Requestを歓迎します。手順は[CONTRIBUTING.md](CONTRIBUTING
 
 - [Apache License, Version 2.0](LICENSE-APACHE)
 - [MIT License](LICENSE-MIT)
-
-## 既知の制限
-
-- IPv4のみ対応
-- ICMP、サービス、Named Pipe、DPAPIはWindows専用(他OSではビルドは通るが、実行時にエラーになる)
-- 通知はログとDiscord Webhookのみ。トースト通知は未対応(サービスはセッション0で動くため、実装するならユーザーセッション側の常駐クライアントが必要)
-- pingは全ターゲットを同時に送って全員の結果を待つため、応答しないターゲットがあると、その分だけ全ターゲットの計測周期が`timeout_ms`に引きずられる
-- `rtt_ms`はAPIの返却値ではなく、呼び出し前後の`Instant`による実測値
-- ディスク使用率は負荷を避けるため、systemの30サンプルに1回だけ更新する
-- system / processのCPU使用率とNICの送受信量は`sysinfo`の値
